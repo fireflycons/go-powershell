@@ -94,6 +94,9 @@ func (s *shell) Exit() {
 }
 
 func streamReader(stream io.Reader, boundary string, buffer *string, signal *sync.WaitGroup) error {
+
+	defer signal.Done()
+
 	// read all output until we have found our boundary token
 	output := strings.Builder{}
 	bufsize := 64
@@ -114,11 +117,10 @@ func streamReader(stream io.Reader, boundary string, buffer *string, signal *syn
 	}
 
 	*buffer = strings.TrimSuffix(output.String(), marker)
-	signal.Done()
 
 	return nil
 }
 
 func createBoundary() string {
-	return "$gorilla" + utils.CreateRandomString(12) + "$"
+	return "$boundary" + utils.CreateRandomString(12) + "$"
 }
