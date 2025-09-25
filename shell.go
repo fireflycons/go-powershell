@@ -95,25 +95,25 @@ func (s *shell) Exit() {
 
 func streamReader(stream io.Reader, boundary string, buffer *string, signal *sync.WaitGroup) error {
 	// read all output until we have found our boundary token
-	output := ""
+	output := strings.Builder{}
 	bufsize := 64
 	marker := boundary + newline
+	buf := make([]byte, bufsize)
 
 	for {
-		buf := make([]byte, bufsize)
 		read, err := stream.Read(buf)
 		if err != nil {
 			return err
 		}
 
-		output = output + string(buf[:read])
+		output.Write(buf[:read])
 
-		if strings.HasSuffix(output, marker) {
+		if strings.HasSuffix(output.String(), marker) {
 			break
 		}
 	}
 
-	*buffer = strings.TrimSuffix(output, marker)
+	*buffer = strings.TrimSuffix(output.String(), marker)
 	signal.Done()
 
 	return nil
