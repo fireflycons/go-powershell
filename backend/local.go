@@ -9,6 +9,7 @@ import (
 	"github.com/juju/errors"
 )
 
+// Local represents a PowerShell session on the local machine, that is, the machine executing this code.
 type Local struct{}
 
 func (b *Local) StartProcess(cmd string, args ...string) (Waiter, io.Writer, io.Reader, io.Reader, error) {

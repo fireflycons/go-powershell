@@ -21,6 +21,7 @@ type sshSession interface {
 	Start(string) error
 }
 
+// SSH represents a session on a remote computer, via SSH
 type SSH struct {
 	Session sshSession
 }

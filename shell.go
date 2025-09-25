@@ -1,5 +1,9 @@
 // Copyright (c) 2017 Gorillalabs. All rights reserved.
+// Portions copyright (c) 2025 Firefly IT Consulting Ltd.
 
+// Package powershell provides an interface to run PowerShell code in a powershell
+// session that remains "hot", such that you do not have to create a new instance
+// of the powershell process with each invocation.
 package powershell
 
 import (
@@ -15,11 +19,13 @@ import (
 
 const newline = "\r\n"
 
+// Shell is the interface to a PowerShell session
 type Shell interface {
 	Execute(cmd string) (string, string, error)
 	Exit()
 }
 
+// concrete implementation of shell
 type shell struct {
 	handle backend.Waiter
 	stdin  io.Writer
@@ -28,6 +34,7 @@ type shell struct {
 	lock   *sync.Mutex
 }
 
+// New creates a new PowerShell session
 func New(backend backend.Starter) (Shell, error) {
 	handle, stdin, stdout, stderr, err := backend.StartProcess("powershell.exe", "-NoExit", "-Command", "-")
 	if err != nil {
@@ -43,6 +50,7 @@ func New(backend backend.Starter) (Shell, error) {
 	}, nil
 }
 
+// Execute runs PowerShell script in the session instance, capturing stdout and stderr streams
 func (s *shell) Execute(cmd string) (string, string, error) {
 	if s.handle == nil {
 		return "", "", errors.Annotate(errors.New(cmd), "Cannot execute commands on closed shells.")
@@ -85,6 +93,7 @@ func (s *shell) Execute(cmd string) (string, string, error) {
 	return sout, serr, nil
 }
 
+// Exit releases the PowerShell session, terminating the underlying powershell.exe process
 func (s *shell) Exit() {
 	s.stdin.Write([]byte("exit" + newline))
 

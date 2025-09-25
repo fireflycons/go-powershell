@@ -15,6 +15,7 @@ type session struct {
 	name     string
 }
 
+// NewSession starts a PowerShell session (i.e. New-PSSession)
 func NewSession(upstream Middleware, config *SessionConfig) (Middleware, error) {
 	asserted, ok := config.Credential.(credential)
 	if ok {
@@ -37,10 +38,12 @@ func NewSession(upstream Middleware, config *SessionConfig) (Middleware, error) 
 	return &session{upstream, name}, nil
 }
 
+// Execute executes PowerShell script in the current session
 func (s *session) Execute(cmd string) (string, string, error) {
 	return s.upstream.Execute(fmt.Sprintf("Invoke-Command -Session $%s -Script {%s}", s.name, cmd))
 }
 
+// Exit disconnects the session (i.e. Disconnect-PSSession)
 func (s *session) Exit() {
 	s.upstream.Execute(fmt.Sprintf("Disconnect-PSSession -Session $%s", s.name))
 	s.upstream.Exit()

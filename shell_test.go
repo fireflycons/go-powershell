@@ -1,3 +1,5 @@
+// Copyright (c) 2025 Firefly IT Consulting Ltd.
+
 package powershell
 
 import (

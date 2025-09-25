@@ -15,6 +15,7 @@ const (
 	HTTPSPort = 5986
 )
 
+// SessionConfig provides the properties for configuring a remote session
 type SessionConfig struct {
 	ComputerName          string
 	AllowRedirection      bool
@@ -25,10 +26,12 @@ type SessionConfig struct {
 	UseSSL                bool
 }
 
+// NewSessionConfig returns an empty SessionConfig
 func NewSessionConfig() *SessionConfig {
 	return &SessionConfig{}
 }
 
+// ToArgs emits the SessionConfig properties as a slice of arguments for the New-PSSession command
 func (c *SessionConfig) ToArgs() []string {
 	args := make([]string, 0)
 
@@ -72,6 +75,7 @@ type credential interface {
 	prepare(Middleware) (interface{}, error)
 }
 
+// UserPasswordCredential specifies credentials to connect to a remote computer
 type UserPasswordCredential struct {
 	Username string
 	Password string
