@@ -25,6 +25,7 @@ type shell struct {
 	stdin  io.Writer
 	stdout io.Reader
 	stderr io.Reader
+	lock   *sync.Mutex
 }
 
 func New(backend backend.Starter) (Shell, error) {
@@ -33,7 +34,13 @@ func New(backend backend.Starter) (Shell, error) {
 		return nil, err
 	}
 
-	return &shell{handle, stdin, stdout, stderr}, nil
+	return &shell{
+		handle: handle,
+		stdin:  stdin,
+		stdout: stdout,
+		stderr: stderr,
+		lock:   &sync.Mutex{},
+	}, nil
 }
 
 func (s *shell) Execute(cmd string) (string, string, error) {
@@ -49,6 +56,10 @@ func (s *shell) Execute(cmd string) (string, string, error) {
 	// The finally block is needed to ensure that the boundaries are always written
 	// even if the command itself contains an exit statement.
 	full := fmt.Sprintf("try { %s } catch { [Console]::Error.WriteLine($_.Exception.Message) } finally { [Console]::WriteLine('%s'); [Console]::Error.WriteLine('%s') }%s", cmd, outBoundary, errBoundary, newline)
+
+	// Lock the shell so that only one thread can execute a command at a time
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	_, err := s.stdin.Write([]byte(full))
 	if err != nil {

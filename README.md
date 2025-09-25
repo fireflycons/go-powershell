@@ -1,12 +1,16 @@
 # go-powershell
 
-![License](https://img.shields.io/github/license/gorillalabs/go-powershell.svg)
-[![GoDoc](https://godoc.org/github.com/fireflycons/go-powershell?status.svg)](https://godoc.org/github.com/fireflycons/go-powershell)
+This is a fork of the original Gorilla implementation with some enhancements
+* Wrap all submitted commands in a `try` block to properly capture errors and ensure the output boundary markers are properly written.
+* Make the session thread safe.
+* Optimize the `streamReader` function to perform fewer allocations.
 
 This package is inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
 don't have a static script that you want to execute, bur rather run dynamic
 commands.
+
+The session is kept hot in a single instance of `powershell.exe` such that you do not have the overhead of creating a new PowerShell process every time you want to run some commands.
 
 ## Installation
 
@@ -15,8 +19,8 @@ commands.
 ## Usage
 
 To start a PowerShell shell, you need a backend. Backends take care of starting
-and controlling the actual powershell.exe process. In most cases, you will want
-to use the Local backend, which just uses ``os/exec`` to start the process.
+and controlling the actual `powershell.exe` process. In most cases, you will want
+to use the Local backend, which just uses `os/exec` to start the process.
 
 ```go
 package main
@@ -98,12 +102,7 @@ func main() {
 }
 ```
 
-Note that a single shell instance is not safe for concurrent use, as are remote
-sessions. You can have as many remote sessions using the same shell as you like,
-but you must execute commands serially. If you need concurrency, you can just
-spawn multiple PowerShell processes (i.e. call ``.New()`` multiple times).
-
-Also, note that all commands that you execute are wrapped in special echo
+Note that all commands that you execute are wrapped in special echo
 statements to delimit the stdout/stderr streams. After ``.Execute()``ing a command,
 you can therefore not access ``$LastExitCode`` anymore and expect meaningful
 results.
