@@ -45,7 +45,11 @@ func (s *shell) Execute(cmd string) (string, string, error) {
 	errBoundary := createBoundary()
 
 	// wrap the command in special markers so we know when to stop reading from the pipes
-	full := fmt.Sprintf("%s; echo '%s'; [Console]::Error.WriteLine('%s')%s", cmd, outBoundary, errBoundary, newline)
+	// and also a try block to correctly capture errors.
+	// The finally block is needed to ensure that the boundaries are always written
+	// even if the command itself contains an exit statement.
+	full := fmt.Sprintf("try { %s } catch { [Console]::Error.WriteLine($_.Exception.Message) } finally { [Console]::WriteLine('%s'); [Console]::Error.WriteLine('%s') }%s", cmd, outBoundary, errBoundary, newline)
+	fmt.Println(full)
 
 	_, err := s.stdin.Write([]byte(full))
 	if err != nil {
