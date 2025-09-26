@@ -9,6 +9,7 @@ package powershell
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -95,6 +96,13 @@ func (s *shell) Execute(cmd string) (string, string, error) {
 
 // Exit releases the PowerShell session, terminating the underlying powershell.exe process
 func (s *shell) Exit() {
+
+	// Prevent panics if Exit is called multiple times
+	if s == nil || s.handle == nil {
+		fmt.Fprintf(os.Stderr, "Warning: go-powershell: Attempted to exit a shell that is already closed.\n")
+		return
+	}
+
 	s.stdin.Write([]byte("exit" + newline))
 
 	// if it's possible to close stdin, do so (some backends, like the local one,

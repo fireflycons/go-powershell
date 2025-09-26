@@ -72,3 +72,14 @@ func TestShellConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestShellExit(t *testing.T) {
+
+	// start a local powershell process
+	shell, err := New(&backend.Local{})
+	require.NoError(t, err)
+	shell.Exit()
+
+	// call Exit again - should not panic
+	require.NotPanics(t, func() { shell.Exit() })
+}

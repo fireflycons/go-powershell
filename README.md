@@ -4,6 +4,7 @@ This is a fork of the original Gorilla implementation with some enhancements
 * Wrap all submitted commands in a `try` block to properly capture errors and ensure the output boundary markers are properly written.
 * Make the session thread safe.
 * Optimize the `streamReader` function to perform fewer allocations.
+* Avoid panics if `Shell.Exit` is called on a closed shell.
 
 This package is inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
