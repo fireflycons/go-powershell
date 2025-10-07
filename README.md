@@ -28,6 +28,7 @@ to use the Local backend, which just uses `os/exec` to start the process.
 package main
 
 import (
+    "context"
 	"fmt"
 
 	ps "github.com/fireflycons/go-powershell"
@@ -52,6 +53,18 @@ func main() {
 	}
 
 	fmt.Println(stdout)
+
+    // ... or more safely
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+	stdout, stderr, err := shell.ExecuteWithContext(ctx, "Write-Host 'Hello world'")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(stdout)
+
 }
 ```
 
@@ -60,7 +73,7 @@ func main() {
 You can use an existing PS shell to use PSSession cmdlets to connect to remote
 computers. Instead of manually handling that, you can use the Session middleware,
 which takes care of authentication. Note that you can still use the "raw" shell
-to execute commands on the computer where the powershell host process is running.
+to execute commands on the computer where the PowerShell host process is running.
 
 ```go
 package main
