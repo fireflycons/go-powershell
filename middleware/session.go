@@ -45,6 +45,7 @@ func (s *session) Execute(cmd string) (string, string, error) {
 
 // Exit disconnects the session (i.e. Disconnect-PSSession)
 func (s *session) Exit() {
-	s.upstream.Execute(fmt.Sprintf("Disconnect-PSSession -Session $%s", s.name))
+	// Discard errors here. We are binning the session
+	_, _, _ = s.upstream.Execute(fmt.Sprintf("Disconnect-PSSession -Session $%s", s.name))
 	s.upstream.Exit()
 }

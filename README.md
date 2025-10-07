@@ -5,8 +5,9 @@ This is a fork of the original Gorilla implementation with some enhancements
 * Make the session thread safe.
 * Optimize the `streamReader` function to perform fewer allocations.
 * Avoid panics if `Shell.Exit` is called on a closed shell.
+* Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the stdout and stderr pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
 
-This package is inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
+This package was originally inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
 don't have a static script that you want to execute, bur rather run dynamic
 commands.
@@ -27,6 +28,7 @@ to use the Local backend, which just uses `os/exec` to start the process.
 package main
 
 import (
+    "context"
 	"fmt"
 
 	ps "github.com/fireflycons/go-powershell"
@@ -51,6 +53,18 @@ func main() {
 	}
 
 	fmt.Println(stdout)
+
+    // ... or more safely
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+	stdout, stderr, err := shell.ExecuteWithContext(ctx, "Write-Host 'Hello world'")
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(stdout)
+
 }
 ```
 
@@ -59,7 +73,7 @@ func main() {
 You can use an existing PS shell to use PSSession cmdlets to connect to remote
 computers. Instead of manually handling that, you can use the Session middleware,
 which takes care of authentication. Note that you can still use the "raw" shell
-to execute commands on the computer where the powershell host process is running.
+to execute commands on the computer where the PowerShell host process is running.
 
 ```go
 package main
