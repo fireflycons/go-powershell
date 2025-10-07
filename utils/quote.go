@@ -5,5 +5,5 @@ package utils
 import "strings"
 
 func QuoteArg(s string) string {
-	return "'" + strings.Replace(s, "'", "\"", -1) + "'"
+	return "'" + strings.ReplaceAll(s, "'", "\"") + "'"
 }

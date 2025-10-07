@@ -5,8 +5,9 @@ This is a fork of the original Gorilla implementation with some enhancements
 * Make the session thread safe.
 * Optimize the `streamReader` function to perform fewer allocations.
 * Avoid panics if `Shell.Exit` is called on a closed shell.
+* Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the stdout and stderr pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
 
-This package is inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
+This package was originally inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
 don't have a static script that you want to execute, bur rather run dynamic
 commands.

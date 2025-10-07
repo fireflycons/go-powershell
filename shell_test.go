@@ -3,11 +3,13 @@
 package powershell
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/fireflycons/go-powershell/backend"
 	"github.com/stretchr/testify/require"
@@ -15,11 +17,8 @@ import (
 
 func TestShell(t *testing.T) {
 
-	// choose a backend
-	back := &backend.Local{}
-
 	// start a local powershell process
-	shell, err := New(back)
+	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
 	defer shell.Exit()
 
@@ -35,6 +34,31 @@ func TestShell(t *testing.T) {
 	_, stderr, err := shell.Execute("throw 'This is an error'")
 	require.Error(t, err)
 	fmt.Println(stderr)
+}
+
+func TestShellWithContext(t *testing.T) {
+
+	// start a local powershell process
+	shell, err := New(&backend.Local{})
+	require.NoError(t, err)
+	defer shell.Exit()
+
+	// ... and interact with it
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	// This command with extra linebreaks is going to cause the session to hang
+	_, _, err = shell.ExecuteWithContext(ctx, "Get-WmiObject -Class Win32_Processor\r\ngci -Path C:\\\r\n")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// Now make sure the session isn't broken
+	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Second)
+	defer cancel2()
+	stdout, _, err := shell.ExecuteWithContext(ctx2, "Write-Host 'Hello'")
+	require.NoError(t, err)
+	fmt.Println(stdout)
 }
 
 func TestShellConcurrent(t *testing.T) {
