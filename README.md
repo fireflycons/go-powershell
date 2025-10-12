@@ -1,11 +1,17 @@
 # go-powershell
 
 This is a fork of the original Gorilla implementation with some enhancements
+* Support [pwsh](https://github.com/PowerShell/PowerShell), the newer .NET Core version of PowerShell. You can choose whether to start this or regular Windows PowerShell.
 * Wrap all submitted commands in a `try` block to properly capture errors and ensure the output boundary markers are properly written.
 * Make the session thread safe.
 * Optimize the `streamReader` function to perform fewer allocations.
 * Avoid panics if `Shell.Exit` is called on a closed shell.
+* Add ability to pre-load modules when the shell is started.
 * Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the stdout and stderr pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
+* Added an additional shell method `Version` which returns the underlying PowerShell host's version
+
+Future changes:
+* Support Linux and Mac (pwsh only)
 
 This package was originally inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
@@ -36,7 +42,7 @@ import (
 )
 
 func main() {
-	// choose a backend
+	// choose a backend, which by default will use Windows Powershell (5.1)
 	back := &backend.Local{}
 
 	// start a local powershell process
@@ -65,6 +71,32 @@ func main() {
 
 	fmt.Println(stdout)
 
+}
+```
+
+Alternatively with pwsh (PowerShell version >= 6). This will be made to work for Linux and Mac in a future version.
+
+```go
+package main
+
+import (
+    "context"
+	"fmt"
+
+	ps "github.com/fireflycons/go-powershell"
+	"github.com/fireflycons/go-powershell/backend"
+)
+
+func main() {
+	// choose a backend, requesting pwsh
+	back := &backend.Local{Version: backend.Pwsh}
+
+	// start a local powershell process
+	shell, err := ps.New(back)
+	if err != nil {
+		panic(err)
+	}
+	defer shell.Exit()
 }
 ```
 

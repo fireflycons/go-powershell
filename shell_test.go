@@ -99,11 +99,49 @@ func TestShellConcurrent(t *testing.T) {
 
 func TestShellExit(t *testing.T) {
 
-	// start a local powershell process
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
 	shell.Exit()
 
 	// call Exit again - should not panic
 	require.NotPanics(t, func() { shell.Exit() })
+}
+
+func TestShellWindowsPowerShell(t *testing.T) {
+
+	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
+	require.NoError(t, err)
+	defer shell.Exit()
+
+	require.Equal(t, int64(5), shell.Version().Major, "Expected PowerShell major version 5")
+}
+
+func TestShellPwsh(t *testing.T) {
+
+	shell, err := New(&backend.Local{Version: backend.Pwsh})
+	defer shell.Exit()
+	require.NoError(t, err)
+
+	v := shell.Version().Major
+	require.Greater(t, v, int64(5), "Expected PowerShell major version > 5, but got %s. Maybe pwsh is not installed here", v)
+}
+
+func TestWithModules(t *testing.T) {
+
+	// These modules should be present on all systems
+	// but not imported by default
+	modules := []string{"CimCmdlets", "Microsoft.PowerShell.Security"}
+
+	shell, err := New(
+		&backend.Local{},
+		WithModules(modules...),
+	)
+	defer shell.Exit()
+	require.NoError(t, err)
+
+	for _, mod := range modules {
+		out, _, err := shell.Execute(fmt.Sprintf(`if (Get-Module %s) { "YES" } else {"NO"}`, mod))
+		require.NoError(t, err)
+		require.Equal(t, "YES", strings.TrimSpace(out))
+	}
 }

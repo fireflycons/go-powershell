@@ -1,9 +1,10 @@
 // Copyright (c) 2017 Gorillalabs. All rights reserved.
 // Portions copyright (c) 2025 Firefly IT Consulting Ltd.
 
-// Package powershell provides an interface to run PowerShell code in a powershell
+// Package powershell provides an interface to run PowerShell code in a
 // session that remains "hot", such that you do not have to create a new instance
-// of the powershell process with each invocation.
+// of the powershell process with each invocation. Supports Windows PowerShell and pwsh,
+// contexts and multithreaded use.
 package powershell
 
 import (
@@ -11,10 +12,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/fireflycons/go-powershell/backend"
 	"github.com/fireflycons/go-powershell/utils"
 	"github.com/juju/errors"
@@ -28,12 +31,30 @@ type ShellOptions struct {
 	modulesToLoad []string
 }
 
+// ShellOptionFunc describes optional argmuments to add to the [New] call.
 type ShellOptionFunc func(*ShellOptions)
 
 // Shell is the interface to a PowerShell session
 type Shell interface {
+	// Execute runs PowerShell script in the session instance, capturing stdout and stderr streams
+	//
+	// This call may block indefinitely if the command is not well formed.
 	Execute(cmd string) (string, string, error)
+
+	// ExecuteWithContext runs PowerShell script in the session instance, capturing stdout and stderr streams.
+	//
+	// The context allows cancellation of the command. Streams to/from the PowerShell session may
+	// block indefinitely if the command is not well formed as the input may still be waiting.
+	//
+	// Note that if the error is "context deadline exceeded", the underlying session will be
+	// unstable and it will be restarted. A restarted shell _may_ be unstable!
 	ExecuteWithContext(ctx context.Context, cmd string) (string, string, error)
+
+	// Version returns the PowerShell version as reported by the $Host built-in variable.
+	// If there was an error reading this, verin.Major will be -1
+	Version() *semver.Version
+
+	// Exit terminates the underlying PowerShell process.
 	Exit()
 }
 
@@ -44,6 +65,8 @@ type shell struct {
 	stdin   io.Writer
 	stdout  io.Reader
 	stderr  io.Reader
+	version *semver.Version
+	options *ShellOptions
 	lock    *sync.Mutex
 }
 
@@ -53,6 +76,11 @@ func New(backend backend.Starter, opts ...ShellOptionFunc) (Shell, error) {
 	s := &shell{
 		backend: backend,
 		lock:    &sync.Mutex{},
+		options: &ShellOptions{},
+	}
+
+	for _, opt := range opts {
+		opt(s.options)
 	}
 
 	if err := s.start(); err != nil {
@@ -92,6 +120,10 @@ func (s *shell) ExecuteWithContext(ctx context.Context, cmd string) (string, str
 	sout, serr, err := s.executeWithContext(ctx, cmd)
 	s.lock.Unlock()
 	return sout, serr, err
+}
+
+func (s *shell) Version() *semver.Version {
+	return s.version
 }
 
 // Exit releases the PowerShell session, terminating the underlying powershell.exe process
@@ -176,7 +208,27 @@ func (s *shell) executeWithContext(ctx context.Context, cmd string) (string, str
 
 func (s *shell) start() error {
 
-	handle, stdin, stdout, stderr, err := s.backend.StartProcess("powershell.exe", "-NoExit", "-Command", "-")
+	var ps string
+
+	if local, ok := s.backend.(*backend.Local); ok {
+
+		var (
+			err error
+		)
+
+		switch local.Version {
+		case backend.WindowsPowerShell:
+			ps = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+		case backend.Pwsh:
+			ps, err = exec.LookPath("pwsh")
+			if err != nil {
+				// Fallbask to default powershell
+				ps = "powershell.exe"
+			}
+		}
+	}
+
+	handle, stdin, stdout, stderr, err := s.backend.StartProcess(ps, "-NoExit", "-Command", "-")
 	if err != nil {
 		return err
 	}
@@ -185,6 +237,25 @@ func (s *shell) start() error {
 	s.stdin = stdin
 	s.stdout = stdout
 	s.stderr = stderr
+
+	// Read the powershell host's version
+	if versionStr, _, err := s.Execute(`Write-Host -NoNewline "$($host.version.major).$($host.version.minor).$($host.version.build)"`); err == nil {
+		if v, err := semver.NewVersion(versionStr); err == nil {
+			s.version = v
+		} else {
+			s.version = &semver.Version{
+				Major: -1,
+			}
+		}
+	}
+
+	// Preload any optional modules
+	if len(s.options.modulesToLoad) > 0 {
+		modules := strings.Join(s.options.modulesToLoad, ",")
+		if _, errStr, err := s.Execute("Import-Module " + modules); err != nil {
+			return errors.Annotate(err, errStr)
+		}
+	}
 
 	return nil
 }
