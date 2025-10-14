@@ -1,6 +1,6 @@
 # go-powershell
 
-This is a fork of the original Gorilla implementation with some [enhancements](#enhancements).
+This is a fork of the original Gorilla implementation with many [enhancements](#enhancements) over the other forks found here!
 
 This package was originally inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
@@ -47,6 +47,8 @@ func main() {
 	defer shell.Exit()
 
 	// ... and interact with it
+    // Can be a single command, or multiple chained with ;
+    // Must not be multiline - see Excuting entire scripts below.
 	stdout, stderr, err := shell.Execute("Get-WmiObject -Class Win32_Processor")
 	if err != nil {
 		panic(err)
@@ -121,24 +123,23 @@ func main() {
 Write-Host "hello"
 Write-Host "goodbye"
 `
-	scriptFile := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
 
-    if err != nil {
-        panic(err)
-    }
-
-    defer func() {
-		os.Remove(scriptFile)
-	}()
-
-    // Dot-source script
-    sout, _, err := shell.Execute(". " + scriptFile)
+    sout, _, err := shell.ExecuteScript(script)
 
     if err != nil {
         panic(err)
     }
 
     fmt.Println(sout)
+
+    scriptFile = "this-file-must-exist.ps1"
+
+    sout, _, err = shell.ExecuteScript(scriptFile)
+
+    if err != nil {
+        panic(err)
+    }
+
 }
 ```
 
@@ -208,6 +209,7 @@ The following enhancements have been made to the original code:
 * Add ability to pre-load modules when the shell is started.
 * Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the `stdout` and `stderr` pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
 * Added an additional shell method `Version` which returns the underlying PowerShell host's version.
+* Added additional shell methods `ExecuteScript` and `ExecuteScriptWithContext` to run multiline scripts or external script files.
 * Sentinel errors returned by shell methods that can be tested with Errors.Is
 * Much enlarged test suite.
 

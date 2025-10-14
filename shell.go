@@ -3,15 +3,19 @@
 
 // Package powershell provides an interface to run PowerShell code in a
 // session that remains "hot", such that you do not have to create a new instance
-// of the powershell process with each invocation. Supports Windows PowerShell and pwsh,
-// contexts and multithreaded use.
+// of the powershell process with each invocation, with many enhancements over other packages of the same name!
+// Supports Windows PowerShell and pwsh, contexts and multithreaded use.
 package powershell
 
 import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +28,14 @@ import (
 )
 
 const newline = "\r\n"
+
+type scriptType int
+
+const (
+	scriptUnknown scriptType = iota
+	scriptExternalFile
+	scriptMultiline
+)
 
 var (
 	// ErrInvalidCommandString is returned if the command passed contains any CR or LF characters
@@ -42,6 +54,10 @@ var (
 	// read from stderr. This will include unhandled exceptions (uncaught throws)
 	// and any direct writes to stderr like Console::Error.WriteLine().
 	ErrCommandFailed = errors.New("data written to stderr")
+
+	// ErrScript can be returned by the ExecuteScript functions if the
+	// type of script passed as an argument cannot be determined
+	ErrScript = errors.New("cannot determine script type")
 )
 
 // ShellOptions represents options passed to the shell when it is started.
@@ -54,12 +70,10 @@ type ShellOptionFunc func(*ShellOptions)
 
 // Shell is the interface to a PowerShell session
 type Shell interface {
-	// Execute runs PowerShell script in the session instance, capturing stdout and stderr streams
-	//
-	// This call may block indefinitely if the command is not well formed.
+	// Execute runs PowerShell commands in the session instance, capturing stdout and stderr streams
 	Execute(cmd string) (string, string, error)
 
-	// ExecuteWithContext runs PowerShell script in the session instance, capturing stdout and stderr streams.
+	// ExecuteWithContext runs PowerShell commands in the session instance, capturing stdout and stderr streams.
 	//
 	// The context allows cancellation of the command. Streams to/from the PowerShell session may
 	// block indefinitely if the command is not well formed as the input may still be waiting.
@@ -67,6 +81,25 @@ type Shell interface {
 	// Note that if the error is "context deadline exceeded", the underlying session will be
 	// unstable and it will be restarted. A restarted shell _may_ be unstable!
 	ExecuteWithContext(ctx context.Context, cmd string) (string, string, error)
+
+	// ExecuteScript runs a multiline script or external script file in the session instance, capturing stdout and stderr streams
+	//
+	// If the argument is a path to an existing script file, then that will be executed,
+	// otherwise the value is assumed to be a multiline string.
+	ExecuteScript(scriptOrPath string) (string, string, error)
+
+	// ExecuteScriptWithContext runs a multiline script or external script file in the session instance, capturing stdout and stderr streams.
+	//
+	//
+	// If the argument is a path to an existing script file, then that will be executed,
+	// otherwise the value is assumed to be a multiline string.
+	//
+	// The context allows cancellation of the command. Streams to/from the PowerShell session may
+	// block indefinitely if the command is not well formed as the input may still be waiting.
+	//
+	// Note that if the error is "context deadline exceeded", the underlying session will be
+	// unstable and it will be restarted. A restarted shell _may_ be unstable!
+	ExecuteScriptWithContext(ctx context.Context, scriptOrPath string) (string, string, error)
 
 	// Version returns the PowerShell version as reported by the $Host built-in variable.
 	// If there was an error reading this, version.Major will be -1.
@@ -121,7 +154,7 @@ func WithModules(modules ...string) ShellOptionFunc {
 	}
 }
 
-// Execute runs PowerShell script in the session instance, capturing stdout and stderr streams
+// Execute runs PowerShell commands in the session instance, capturing stdout and stderr streams
 //
 // This call may block indefinitely if the command is not well formed.
 func (s *shell) Execute(cmd string) (string, string, error) {
@@ -129,7 +162,7 @@ func (s *shell) Execute(cmd string) (string, string, error) {
 	return s.ExecuteWithContext(context.TODO(), cmd)
 }
 
-// ExecuteWithContext runs PowerShell script in the session instance, capturing stdout and stderr streams.
+// ExecuteWithContext runs PowerShell commands in the session instance, capturing stdout and stderr streams.
 //
 // The context allows cancellation of the command. Streams to/from the PowerShell session may
 // block indefinitely if the command is not well formed as the input may still be waiting.
@@ -174,6 +207,53 @@ func (s *shell) Exit() error {
 	s.stdout = nil
 	s.stderr = nil
 	return nil
+}
+
+// ExecuteScript runs a multiline script or external script file in the session instance, capturing stdout and stderr streams
+//
+// If the argument is a path to an existing script file, then that will be executed,
+// otherwise the value is assumed to be a multiline string.
+func (s *shell) ExecuteScript(scriptOrPath string) (string, string, error) {
+
+	return s.ExecuteScriptWithContext(context.Background(), scriptOrPath)
+}
+
+// ExecuteScriptWithContext runs a multiline script or external script file in the session instance, capturing stdout and stderr streams.
+//
+// If the argument is a path to an existing script file, then that will be executed,
+// otherwise the value is assumed to be a multiline string.
+//
+// The context allows cancellation of the command. Streams to/from the PowerShell session may
+// block indefinitely if the command is not well formed as the input may still be waiting.
+//
+// Note that if the error is "context deadline exceeded", the underlying session will be
+// unstable and it will be restarted. A restarted shell _may_ be unstable!
+func (s *shell) ExecuteScriptWithContext(ctx context.Context, scriptOrPath string) (string, string, error) {
+
+	st, err := determineScriptType(scriptOrPath)
+
+	if err != nil {
+		return "", "", err
+	}
+
+	// Assume externalFile
+	scriptPath := scriptOrPath
+
+	switch st {
+	case scriptMultiline:
+		path, teardown, err := prepareMultilineScript(scriptOrPath)
+		if err != nil {
+			return "", "", err
+		}
+		scriptPath = path
+		defer teardown()
+
+	case scriptUnknown:
+		return "", "", ErrScript
+	}
+
+	// Dot source external file
+	return s.ExecuteWithContext(ctx, `. "`+scriptPath+`"`)
 }
 
 func (s *shell) executeWithContext(ctx context.Context, cmd string) (string, string, error) {
@@ -430,4 +510,53 @@ func readWithContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 
 func createBoundary() string {
 	return "$boundary" + utils.CreateRandomString(12) + "$"
+}
+
+var windowsPathPattern = regexp.MustCompile(`^(?:[a-zA-Z]:[\\/](?:[^\\/:*?"<>|\r\n]+[\\/]?)*|\\\\[^\\/:*?"<>|\r\n]+\\[^\\/:*?"<>|\r\n]+(?:\\[^\\/:*?"<>|\r\n]+)*|\.{1,2}(?:[\\/][^\\/:*?"<>|\r\n]+)*|[^\\/:*?"<>|\r\n]+(?:[\\/][^\\/:*?"<>|\r\n]+)*)$`)
+var posixPathPattern = regexp.MustCompile(`^(?:/(?:[^/\0]+/)*[^/\0]*|\.{1,2}(?:/[^/\0]+)*/?[^/\0]*|[^/\0]+(?:/[^/\0]+)*)$`)
+
+func determineScriptType(scriptOrPath string) (scriptType, error) {
+
+	if strings.ContainsAny(scriptOrPath, "\r\n") {
+		// multline text
+		return scriptMultiline, nil
+	}
+
+	rx := func() *regexp.Regexp {
+		if runtime.GOOS == "windows" {
+			return windowsPathPattern
+		}
+		return posixPathPattern
+	}()
+
+	if rx.MatchString(scriptOrPath) {
+
+		s, err := os.Stat(scriptOrPath)
+		if err != nil {
+			return scriptExternalFile, err
+		}
+		if s.IsDir() {
+			return scriptExternalFile, os.ErrNotExist
+		}
+
+		return scriptExternalFile, nil
+	}
+
+	return scriptUnknown, ErrScript
+}
+
+func prepareMultilineScript(script string) (string, func(), error) {
+
+	path := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
+
+	if err := os.WriteFile(path, []byte(script), 0644); err != nil {
+		return "", func() {}, err
+	}
+
+	return path,
+		func() {
+			// teardown
+			_ = os.Remove(path)
+		},
+		nil
 }

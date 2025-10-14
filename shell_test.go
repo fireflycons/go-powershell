@@ -207,7 +207,24 @@ func TestShellWriteClosedShell(t *testing.T) {
 	require.ErrorIs(t, err, ErrShellClosed)
 }
 
-func TestShellRunScript(t *testing.T) {
+func TestShellExecuteMultilineScript(t *testing.T) {
+	script := `
+Write-Host "hello"
+Write-Host "goodbye"
+`
+	shell, err := New(&backend.Local{})
+	require.NoError(t, err)
+	defer func() {
+		_ = shell.Exit()
+	}()
+
+	sout, _, err := shell.ExecuteScript(script)
+	require.NoError(t, err)
+	require.Contains(t, sout, "hello")
+	require.Contains(t, sout, "goodbye")
+}
+
+func TestShellExecuteScriptFile(t *testing.T) {
 	script := `
 Write-Host "hello"
 Write-Host "goodbye"
@@ -224,7 +241,7 @@ Write-Host "goodbye"
 		_ = shell.Exit()
 	}()
 
-	sout, _, err := shell.Execute(". " + scriptFile)
+	sout, _, err := shell.ExecuteScript(scriptFile)
 	require.NoError(t, err)
 	require.Contains(t, sout, "hello")
 	require.Contains(t, sout, "goodbye")
@@ -399,5 +416,67 @@ func TestStreamReader(t *testing.T) {
 	// Run the whole test twice to check that having stalled the pipe that it recovers.
 	for i := range 2 {
 		testFunc(i)
+	}
+}
+
+func TestDetermineScriptType(t *testing.T) {
+
+	testFile := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
+
+	require.NoError(t, os.WriteFile(testFile, []byte("Write-Host"), 0644))
+	defer func() {
+		_ = os.Remove(testFile)
+	}()
+
+	tests := []struct {
+		name          string
+		input         string
+		expected      scriptType
+		expectedError error
+	}{
+		{
+			name:     "ps1 file exists",
+			input:    testFile,
+			expected: scriptExternalFile,
+		},
+		{
+			name:          "ps1 file does not exist",
+			input:         "asdaer.ps1",
+			expected:      scriptExternalFile,
+			expectedError: os.ErrNotExist,
+		},
+		{
+			name: "multiline",
+			input: `
+			Write-Host
+			Write-Host`,
+			expected: scriptMultiline,
+		},
+		{
+			name:          "command not script",
+			input:         `Write-Host "hello"`,
+			expected:      scriptUnknown,
+			expectedError: ErrScript,
+		},
+		{
+			name:          "command that looks like a filename",
+			input:         `Write-Host`,
+			expected:      scriptExternalFile,
+			expectedError: os.ErrNotExist,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := determineScriptType(test.input)
+
+			if test.expectedError != nil {
+				require.ErrorIs(t, err, test.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, test.expected, result)
+		})
 	}
 }
