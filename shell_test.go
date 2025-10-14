@@ -199,9 +199,9 @@ func TestShellExceptionThrown(t *testing.T) {
 func TestShellWriteClosedShell(t *testing.T) {
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	defer func() {
-		_ = shell.Exit()
-	}()
+
+	// Close it now
+	_ = shell.Exit()
 
 	_, _, err = shell.Execute("Write-Host")
 	require.ErrorIs(t, err, ErrShellClosed)
