@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -25,6 +24,25 @@ import (
 )
 
 const newline = "\r\n"
+
+var (
+	// ErrInvalidCommandString is returned if the command passed contains any CR or LF characters
+	// since this will stall the pipe. Note that leading and trailing space will be trimmed automatically.
+	// Multiple commands should be chained with semicolon, not line breaks.
+	ErrInvalidCommandString = errors.New("invalid command")
+
+	// ErrShellClosed is returned if an attempt is made to perform an operation on a closed shell
+	ErrShellClosed = errors.New("shell is closed")
+
+	// ErrPipeWrite is returned if there was a problem sending the command
+	// to the session's sdtin pipe.
+	ErrPipeWrite = errors.New("error sending command")
+
+	// ErrCommandFailed will be returned if any output from the command sent was
+	// read from stderr. This will include unhandled exceptions (uncaught throws)
+	// and any direct writes to stderr like Console::Error.WriteLine().
+	ErrCommandFailed = errors.New("data written to stderr")
+)
 
 // ShellOptions represents options passed to the shell when it is started.
 type ShellOptions struct {
@@ -51,23 +69,25 @@ type Shell interface {
 	ExecuteWithContext(ctx context.Context, cmd string) (string, string, error)
 
 	// Version returns the PowerShell version as reported by the $Host built-in variable.
-	// If there was an error reading this, verin.Major will be -1
+	// If there was an error reading this, version.Major will be -1.
 	Version() *semver.Version
 
 	// Exit terminates the underlying PowerShell process.
-	Exit()
+	// Error will be non-nil if shell already closed.
+	Exit() error
 }
 
 // concrete implementation of shell
 type shell struct {
-	handle  backend.Waiter
-	backend backend.Starter
-	stdin   io.Writer
-	stdout  io.Reader
-	stderr  io.Reader
-	version *semver.Version
-	options *ShellOptions
-	lock    *sync.Mutex
+	handle     backend.Waiter
+	backend    backend.Starter
+	stdin      io.Writer
+	stdout     io.Reader
+	stderr     io.Reader
+	version    *semver.Version
+	options    *ShellOptions
+	restarting int
+	lock       *sync.Mutex
 }
 
 // New creates a new PowerShell session
@@ -84,7 +104,10 @@ func New(backend backend.Starter, opts ...ShellOptionFunc) (Shell, error) {
 	}
 
 	if err := s.start(); err != nil {
-		return nil, err
+		// Still return the shell here
+		// as it may have started a process
+		// that needs to be cleaned up
+		return s, err
 	}
 
 	return s, nil
@@ -127,12 +150,11 @@ func (s *shell) Version() *semver.Version {
 }
 
 // Exit releases the PowerShell session, terminating the underlying powershell.exe process
-func (s *shell) Exit() {
+func (s *shell) Exit() error {
 
 	// Prevent panics if Exit is called multiple times
 	if s == nil || s.handle == nil {
-		fmt.Fprintf(os.Stderr, "Warning: go-powershell: Attempted to exit a shell that is already closed.\n")
-		return
+		return ErrShellClosed
 	}
 
 	// Discard error here and everywhere else. We are binning the session
@@ -151,11 +173,23 @@ func (s *shell) Exit() {
 	s.stdin = nil
 	s.stdout = nil
 	s.stderr = nil
+	return nil
 }
 
 func (s *shell) executeWithContext(ctx context.Context, cmd string) (string, string, error) {
+
 	if s.handle == nil {
-		return "", "", errors.Annotate(errors.New(cmd), "Cannot execute commands on closed shells.")
+		return "", "", ErrShellClosed
+	}
+
+	// Sanitize command string
+	cmd = strings.TrimSpace(cmd)
+
+	if strings.ContainsAny(cmd, "\r\n") {
+		// Line breaks within the body of the command string will
+		// stall the pipe - nothing will be produced on PowerShell's stdout
+		// and everything will hang.
+		return "", "", ErrInvalidCommandString
 	}
 
 	outBoundary := createBoundary()
@@ -165,11 +199,17 @@ func (s *shell) executeWithContext(ctx context.Context, cmd string) (string, str
 	// and also a try block to correctly capture errors.
 	// The finally block is needed to ensure that the boundaries are always written
 	// even if the command itself contains an exit statement.
-	full := fmt.Sprintf("try { %s } catch { [Console]::Error.WriteLine($_.Exception.Message) } finally { [Console]::WriteLine('%s'); [Console]::Error.WriteLine('%s') }%s", cmd, outBoundary, errBoundary, newline)
+	full := fmt.Sprintf(
+		"try { %s } catch { [Console]::Error.WriteLine($_.Exception.Message) } finally { [Console]::WriteLine('%s'); [Console]::Error.WriteLine('%s') }%s",
+		cmd,
+		outBoundary,
+		errBoundary,
+		newline,
+	)
 
 	_, err := s.stdin.Write([]byte(full))
 	if err != nil {
-		return "", "", errors.Annotate(errors.Annotate(err, cmd), "Could not send PowerShell command")
+		return "", "", errors.Wrap(ErrPipeWrite, errors.Annotate(err, cmd))
 	}
 
 	// read stdout and stderr
@@ -189,18 +229,27 @@ func (s *shell) executeWithContext(ctx context.Context, cmd string) (string, str
 	err = eg.Wait()
 
 	if err != nil {
+		// DeadlineExceeded or IO errors should be all
+		// we get here.
 		if errors.Is(err, context.DeadlineExceeded) {
 
-			if err1 := s.restart(); err1 != nil {
-				err = errors.Wrap(err, err1)
+			if s.restarting == 0 {
+				s.restarting++
+				if err1 := s.restart(); err1 != nil {
+					err = errors.Wrap(err, err1)
+				}
 			}
+
+			s.restarting = 0
 		}
 
-		return "", err.Error(), err
+		return "", "", err
 	}
 
 	if len(serr) > 0 {
-		return sout, serr, errors.Annotate(errors.New(cmd), serr)
+		// Any "normal" error, such as an unhandled exception
+		// or direct write to stderr will be caught here.
+		return sout, serr, errors.Annotate(ErrCommandFailed, cmd)
 	}
 
 	return sout, serr, nil
@@ -228,7 +277,7 @@ func (s *shell) start() error {
 		}
 	}
 
-	handle, stdin, stdout, stderr, err := s.backend.StartProcess(ps, "-NoExit", "-Command", "-")
+	handle, stdin, stdout, stderr, err := s.backend.StartProcess(ps, "-NoProfile", "-NoExit", "-Command", "-")
 	if err != nil {
 		return err
 	}
@@ -238,21 +287,35 @@ func (s *shell) start() error {
 	s.stdout = stdout
 	s.stderr = stderr
 
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
 	// Read the powershell host's version
-	if versionStr, _, err := s.Execute(`Write-Host -NoNewline "$($host.version.major).$($host.version.minor).$($host.version.build)"`); err == nil {
-		if v, err := semver.NewVersion(versionStr); err == nil {
+	if versionStr, _, err := s.executeWithContext(ctx, `Write-Host "$($host.version.major).$($host.version.minor).$($host.version.build)"`); err == nil {
+		if v, err := semver.NewVersion(strings.TrimSpace(versionStr)); err == nil {
 			s.version = v
-		} else {
-			s.version = &semver.Version{
-				Major: -1,
-			}
+		}
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		return err
+	} else {
+		s.version = &semver.Version{
+			Major: -1,
 		}
 	}
 
 	// Preload any optional modules
 	if len(s.options.modulesToLoad) > 0 {
-		modules := strings.Join(s.options.modulesToLoad, ",")
-		if _, errStr, err := s.Execute("Import-Module " + modules); err != nil {
+		modules := strings.Join(
+			func() []string {
+				m := make([]string, 0, len(s.options.modulesToLoad))
+				for _, mod := range s.options.modulesToLoad {
+					m = append(m, `"`+mod+`"`)
+				}
+				return m
+			}(),
+			",",
+		)
+		if _, errStr, err := s.executeWithContext(ctx, modules+" | ForEach-Object { if (Get-Module $_) { Remove-Module $_ } ; Import-Module -Force $_ }"); err != nil {
 			return errors.Annotate(err, errStr)
 		}
 	}
@@ -262,11 +325,10 @@ func (s *shell) start() error {
 
 func (s *shell) restart() error {
 
-	s.Exit()
-	err := s.start()
-	// Wait a fraction for new shell to stabilize
-	time.Sleep(time.Millisecond * 500)
-	return err
+	fmt.Println("restarting shell")
+	_ = s.Exit()
+	//time.Sleep(time.Millisecond * 500)
+	return s.start()
 }
 
 func streamReader(ctx context.Context, stream io.Reader, boundary string, buffer *string) error {
@@ -274,8 +336,9 @@ func streamReader(ctx context.Context, stream io.Reader, boundary string, buffer
 	// read all output until we have found our boundary token
 	output := strings.Builder{}
 	bufsize := 64
-	marker := boundary + newline
 	buf := make([]byte, bufsize)
+
+	var outStr string
 
 	for {
 		var (
@@ -283,7 +346,7 @@ func streamReader(ctx context.Context, stream io.Reader, boundary string, buffer
 			err  error
 		)
 
-		if ctx != context.TODO() {
+		if ctx != context.TODO() && ctx != context.Background() {
 			read, err = readWithContext(ctx, stream, buf)
 		} else {
 			read, err = stream.Read(buf)
@@ -295,40 +358,71 @@ func streamReader(ctx context.Context, stream io.Reader, boundary string, buffer
 
 		output.Write(buf[:read])
 
-		if strings.HasSuffix(output.String(), marker) {
+		outStr = strings.TrimRight(output.String(), "\r\n")
+		//log.Printf("streamReader receive: %s\n", outStr)
+		if strings.HasSuffix(outStr, boundary) {
+			// Stop reading when boundary is found
 			break
 		}
 	}
 
-	*buffer = strings.TrimSuffix(output.String(), marker)
+	*buffer = strings.TrimSuffix(outStr, boundary)
 
 	return nil
 }
 
-// ReadWithContext reads from r into buf, returning when either
-// the read completes, the context is canceled, or an error occurs.
 func readWithContext(ctx context.Context, r io.Reader, buf []byte) (int, error) {
 	pr, pw := io.Pipe()
 
-	// Start a background copier that forwards from r -> pw.
+	// Background chunked copier
 	go func() {
-		_, err := io.Copy(pw, r)
-		// When the copy ends or fails, close the pipe.
-		_ = pw.CloseWithError(err)
+		defer pw.Close()
+		tmp := make([]byte, len(buf))
+		n, err := r.Read(tmp)
+		if n > 0 {
+			if _, werr := pw.Write(tmp[:n]); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				_ = pw.CloseWithError(err)
+			}
+		}
 	}()
 
-	// Ensure the pipe is closed when context expires.
+	// Context canceller
 	go func() {
 		<-ctx.Done()
 		_ = pw.CloseWithError(ctx.Err())
 	}()
 
-	// Now do a normal blocking read — this is cancellable via ctx.
-	n, err := pr.Read(buf)
-	if errors.Is(err, io.ErrClosedPipe) {
-		return n, ctx.Err()
+	total := 0
+	for total < len(buf) {
+		n, err := pr.Read(buf[total:])
+		total += n
+
+		if err != nil {
+			if errors.Is(err, io.ErrClosedPipe) {
+				return total, ctx.Err()
+			}
+			return total, err
+		}
+
+		// Return early if we got some bytes — short read, stream may remain open
+		if n > 0 {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return total, ctx.Err()
+		default:
+			continue
+		}
 	}
-	return n, err
+
+	return total, nil
 }
 
 func createBoundary() string {

@@ -1,17 +1,6 @@
 # go-powershell
 
-This is a fork of the original Gorilla implementation with some enhancements
-* Support [pwsh](https://github.com/PowerShell/PowerShell), the newer .NET Core version of PowerShell. You can choose whether to start this or regular Windows PowerShell.
-* Wrap all submitted commands in a `try` block to properly capture errors and ensure the output boundary markers are properly written.
-* Make the session thread safe.
-* Optimize the `streamReader` function to perform fewer allocations.
-* Avoid panics if `Shell.Exit` is called on a closed shell.
-* Add ability to pre-load modules when the shell is started.
-* Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the stdout and stderr pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
-* Added an additional shell method `Version` which returns the underlying PowerShell host's version
-
-Future changes:
-* Support Linux and Mac (pwsh only)
+This is a fork of the original Gorilla implementation with some [enhancements](#enhancements).
 
 This package was originally inspired by [jPowerShell](https://github.com/profesorfalken/jPowerShell)
 and allows one to run and remote-control a PowerShell session. Use this if you
@@ -29,6 +18,11 @@ The session is kept hot in a single instance of `powershell.exe` such that you d
 To start a PowerShell shell, you need a backend. Backends take care of starting
 and controlling the actual `powershell.exe` process. In most cases, you will want
 to use the Local backend, which just uses `os/exec` to start the process.
+
+Note that due to how the inter-process communication works with the underlying session, you cannot
+include any line breaks in your command string, otherwise it will stall the pipes. The command is sanity-checked
+for this before submission and execute methods will fail with [ErrInvalidCommandString].
+If you want to send an entire script, this must be placed in the file system and a command sent to dot-source it.
 
 ```go
 package main
@@ -80,8 +74,6 @@ Alternatively with pwsh (PowerShell version >= 6). This will be made to work for
 package main
 
 import (
-    "context"
-	"fmt"
 
 	ps "github.com/fireflycons/go-powershell"
 	"github.com/fireflycons/go-powershell/backend"
@@ -97,6 +89,56 @@ func main() {
 		panic(err)
 	}
 	defer shell.Exit()
+}
+```
+
+Executing entire scripts
+
+```go
+package main
+
+import (
+
+    "fmt"
+
+	ps "github.com/fireflycons/go-powershell"
+	"github.com/fireflycons/go-powershell/backend"
+	"github.com/fireflycons/go-powershell/utils"
+)
+
+func main() {
+	// choose a backend, requesting pwsh
+	back := &backend.Local{}
+
+	// start a local powershell process
+	shell, err := ps.New(back)
+	if err != nil {
+		panic(err)
+	}
+	defer shell.Exit()
+
+	script := `
+Write-Host "hello"
+Write-Host "goodbye"
+`
+	scriptFile := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
+
+    if err != nil {
+        panic(err)
+    }
+
+    defer func() {
+		os.Remove(scriptFile)
+	}()
+
+    // Dot-source script
+    sout, _, err := shell.Execute(". " + scriptFile)
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(sout)
 }
 ```
 
@@ -153,6 +195,25 @@ Note that all commands that you execute are wrapped in special echo
 statements to delimit the stdout/stderr streams. After ``.Execute()``ing a command,
 you can therefore not access ``$LastExitCode`` anymore and expect meaningful
 results.
+
+## Enhancements
+
+The following enhancements have been made to the original code:
+
+* Support [pwsh](https://github.com/PowerShell/PowerShell), the newer .NET Core version of PowerShell. You can choose whether to start this or regular Windows PowerShell.
+* Wrap all submitted commands in a `try` block to properly capture errors and ensure the output boundary markers are properly written.
+* Make the session thread safe.
+* Optimize the `streamReader` function to perform fewer allocations.
+* Avoid panics if `Shell.Exit` is called on a closed shell. Return an error instead.
+* Add ability to pre-load modules when the shell is started.
+* Added an additional shell method `ExecuteWithContext` that takes a context argument. If a shell command isn't well formed then the `stdout` and `stderr` pipes do not return anything and the `Execute` method will block indefinitely in this case. The underlying session will be restarted before `context.DeadlineExceeded` is returned to the caller. A restarted shell _may_ be unstable!
+* Added an additional shell method `Version` which returns the underlying PowerShell host's version.
+* Sentinel errors returned by shell methods that can be tested with Errors.Is
+* Much enlarged test suite.
+
+Future changes:
+* Support Linux and Mac (pwsh only)
+
 
 ## License
 
