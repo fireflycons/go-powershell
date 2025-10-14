@@ -9,8 +9,21 @@ import (
 	"github.com/juju/errors"
 )
 
+type PowerShellVersion int
+
+const (
+	// Use Windows Powershell (5.1)
+	WindowsPowerShell PowerShellVersion = iota
+
+	// Use pwsh if found on system (version > 5)
+	Pwsh
+)
+
 // Local represents a PowerShell session on the local machine, that is, the machine executing this code.
-type Local struct{}
+type Local struct {
+	// Requested version of PowerShell to start.
+	Version PowerShellVersion // Default 5.1
+}
 
 func (b *Local) StartProcess(cmd string, args ...string) (Waiter, io.Writer, io.Reader, io.Reader, error) {
 	command := exec.Command(cmd, args...)
