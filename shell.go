@@ -376,7 +376,10 @@ func readWithContext(ctx context.Context, r io.Reader, buf []byte) (int, error) 
 
 	// Background chunked copier
 	go func() {
-		defer pw.Close()
+		defer func() {
+			_ = pw.Close()
+		}()
+
 		tmp := make([]byte, len(buf))
 		n, err := r.Read(tmp)
 		if n > 0 {

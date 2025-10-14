@@ -23,7 +23,9 @@ func TestShell(t *testing.T) {
 
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	stdout, _, err := shell.Execute("Get-WmiObject -Class Win32_Processor")
 
@@ -38,7 +40,9 @@ func TestInvalidCommands(t *testing.T) {
 
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	tests := []struct {
 		name        string
@@ -91,7 +95,9 @@ func TestShellWithContext(t *testing.T) {
 
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	timeout := time.Second
 
@@ -136,7 +142,9 @@ func TestShellConcurrent(t *testing.T) {
 	// start a local powershell process
 	shell, err := New(back)
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	// start multiple workers that all use the same shell
 	const numWorkers = 5
@@ -153,7 +161,7 @@ func TestShellExit(t *testing.T) {
 
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	shell.Exit()
+	_ = shell.Exit()
 
 	// call Exit again - should not panic and should report already closed
 	require.NotPanics(t, func() {
@@ -165,7 +173,9 @@ func TestShellWriteStderr(t *testing.T) {
 
 	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	// Any output on stderr will be seen as a command failure!
 	_, serr, err := shell.Execute(`[Console]::Error.WriteLine("error")`)
@@ -176,7 +186,9 @@ func TestShellWriteStderr(t *testing.T) {
 func TestShellExceptionThrown(t *testing.T) {
 	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	msg := "This is an error"
 	_, stderr, err := shell.Execute("throw '" + msg + "'")
@@ -187,7 +199,9 @@ func TestShellExceptionThrown(t *testing.T) {
 func TestShellWriteClosedShell(t *testing.T) {
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	_, _, err = shell.Execute("Write-Host")
 	require.ErrorIs(t, err, ErrShellClosed)
@@ -201,12 +215,14 @@ Write-Host "goodbye"
 	scriptFile := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
 	require.NoError(t, os.WriteFile(scriptFile, []byte(script), 0644), "Error writing script file")
 	defer func() {
-		os.Remove(scriptFile)
+		_ = os.Remove(scriptFile)
 	}()
 
 	shell, err := New(&backend.Local{})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	sout, _, err := shell.Execute(". " + scriptFile)
 	require.NoError(t, err)
@@ -218,7 +234,9 @@ func TestShellWindowsPowerShell(t *testing.T) {
 
 	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 
 	require.Equal(t, int64(5), shell.Version().Major, "Expected PowerShell major version 5")
 }
@@ -226,7 +244,9 @@ func TestShellWindowsPowerShell(t *testing.T) {
 func TestShellPwsh(t *testing.T) {
 
 	shell, err := New(&backend.Local{Version: backend.Pwsh})
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 	require.NoError(t, err)
 
 	v := shell.Version().Major
@@ -243,7 +263,9 @@ func TestWithModules(t *testing.T) {
 		&backend.Local{},
 		WithModules(modules...),
 	)
-	defer shell.Exit()
+	defer func() {
+		_ = shell.Exit()
+	}()
 	require.NoError(t, err)
 
 	for _, mod := range modules {
@@ -258,8 +280,10 @@ func TestReadWithContext(t *testing.T) {
 	const interCommandDelay = time.Millisecond * 100
 
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	}()
 
 	ctx := context.Background()
 	buf := make([]byte, 64)
@@ -308,8 +332,10 @@ func TestStreamReader(t *testing.T) {
 	const interCommandDelay = time.Millisecond * 100
 
 	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+	defer func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	}()
 
 	testFunc := func(iter int) {
 
