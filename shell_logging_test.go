@@ -46,6 +46,10 @@ func TestLogToStandardLibraryLog(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, logbuf.String(), cmd)
 
+	cmd = `throw 'this is an error'`
+	_, _, err = shell.Execute(cmd)
+	require.ErrorIs(t, err, powershell.ErrCommandFailed)
+	require.Contains(t, logbuf.String(), "this is an error")
 	require.NoError(t, shell.Exit())
 
 	logbuf.Reset()

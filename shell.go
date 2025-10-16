@@ -392,7 +392,6 @@ func (s *shell) executeWithContext(ctx context.Context, cmd string) (sout string
 		// Any "normal" error, such as an unhandled exception
 		// or direct write to stderr will be caught here.
 		rerr = errors.Annotate(ErrCommandFailed, cmd)
-		s.options.logger.Errorf("Command execution failed due to data written to stderr: %s", cmd)
 		return
 	}
 
