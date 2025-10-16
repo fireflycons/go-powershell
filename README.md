@@ -239,6 +239,7 @@ The following enhancements have been made to the original code:
 * Added an additional shell method `Version` which returns the underlying PowerShell host's version.
 * Added additional shell methods `ExecuteScript` and `ExecuteScriptWithContext` to run multiline scripts or external script files.
 * Sentinel errors returned by shell methods that can be tested with Errors.Is
+* Ability to log interaction with the underlying PowerShell session (see [tests](./shell_logging_test.go))
 * Much enlarged test suite.
 
 Future changes:
