@@ -24,6 +24,12 @@ include any line breaks in your command string, otherwise it will stall the pipe
 for this before submission and execute methods will fail with [ErrInvalidCommandString].
 If you want to send an entire script, this must be placed in the file system and a command sent to dot-source it.
 
+Local session
+
+
+<details>
+<summary>Expand code</summary>
+
 ```go
 package main
 
@@ -70,7 +76,12 @@ func main() {
 }
 ```
 
+</details>
+
 Alternatively with pwsh (PowerShell version >= 6). This will be made to work for Linux and Mac in a future version.
+
+<details>
+<summary>Expand code</summary>
 
 ```go
 package main
@@ -94,7 +105,14 @@ func main() {
 }
 ```
 
+</details>
+
 Executing entire scripts
+
+The argument passed to `ExecuteScript` (or `ExecuteScriptWithContext`) is first examined to see if it contains newlines and if not, then via regular expression to see if it looks like a file path.
+
+<details>
+<summary>Expand code</summary>
 
 ```go
 package main
@@ -119,6 +137,7 @@ func main() {
 	}
 	defer shell.Exit()
 
+    // script as a string
 	script := `
 Write-Host "hello"
 Write-Host "goodbye"
@@ -132,6 +151,7 @@ Write-Host "goodbye"
 
     fmt.Println(sout)
 
+    // script in a file - will error if file not found
     scriptFile = "this-file-must-exist.ps1"
 
     sout, _, err = shell.ExecuteScript(scriptFile)
@@ -143,12 +163,18 @@ Write-Host "goodbye"
 }
 ```
 
+</details>
+
 ## Remote Sessions
 
 You can use an existing PS shell to use PSSession cmdlets to connect to remote
 computers. Instead of manually handling that, you can use the Session middleware,
 which takes care of authentication. Note that you can still use the "raw" shell
 to execute commands on the computer where the PowerShell host process is running.
+
+<details>
+<summary>Expand code</summary>
+
 
 ```go
 package main
@@ -191,6 +217,8 @@ func main() {
 	fmt.Println(stdout)
 }
 ```
+
+</details>
 
 Note that all commands that you execute are wrapped in special echo
 statements to delimit the stdout/stderr streams. After ``.Execute()``ing a command,

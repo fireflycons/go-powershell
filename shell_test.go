@@ -1,11 +1,10 @@
 // Copyright (c) 2025 Firefly IT Consulting Ltd.
 
-package powershell
+package powershell_test
 
 import (
 	"context"
 	"fmt"
-	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fireflycons/go-powershell"
 	"github.com/fireflycons/go-powershell/backend"
 	"github.com/fireflycons/go-powershell/utils"
 	"github.com/stretchr/testify/require"
@@ -21,7 +21,7 @@ import (
 
 func TestShell(t *testing.T) {
 
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -38,7 +38,7 @@ func TestShell(t *testing.T) {
 
 func TestInvalidCommands(t *testing.T) {
 
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -60,17 +60,17 @@ func TestInvalidCommands(t *testing.T) {
 		{
 			name:        "Embedded LF",
 			commands:    "Write-Host 'hello'\nWrite-Host 'goodbye'",
-			expectError: ErrInvalidCommandString,
+			expectError: powershell.ErrInvalidCommandString,
 		},
 		{
 			name:        "Embedded CR",
 			commands:    "Write-Host 'hello'\rWrite-Host 'goodbye'",
-			expectError: ErrInvalidCommandString,
+			expectError: powershell.ErrInvalidCommandString,
 		},
 		{
 			name:        "Embedded CRLF",
 			commands:    "Write-Host 'hello'\r\nWrite-Host 'goodbye'",
-			expectError: ErrInvalidCommandString,
+			expectError: powershell.ErrInvalidCommandString,
 		},
 		{
 			name:     "Two commands separated by ;",
@@ -93,7 +93,7 @@ func TestInvalidCommands(t *testing.T) {
 
 func TestShellWithContext(t *testing.T) {
 
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -121,7 +121,7 @@ func TestShellWithContext(t *testing.T) {
 
 func TestShellConcurrent(t *testing.T) {
 
-	worker := func(id int, shell Shell, t *testing.T, wg *sync.WaitGroup) {
+	worker := func(id int, shell powershell.Shell, t *testing.T, wg *sync.WaitGroup) {
 
 		defer wg.Done()
 		for i := range 5 {
@@ -140,7 +140,7 @@ func TestShellConcurrent(t *testing.T) {
 	back := &backend.Local{}
 
 	// start a local powershell process
-	shell, err := New(back)
+	shell, err := powershell.New(back)
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -159,19 +159,19 @@ func TestShellConcurrent(t *testing.T) {
 
 func TestShellExit(t *testing.T) {
 
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	_ = shell.Exit()
 
 	// call Exit again - should not panic and should report already closed
 	require.NotPanics(t, func() {
-		require.ErrorIs(t, shell.Exit(), ErrShellClosed)
+		require.ErrorIs(t, shell.Exit(), powershell.ErrShellClosed)
 	})
 }
 
 func TestShellWriteStderr(t *testing.T) {
 
-	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
+	shell, err := powershell.New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -179,12 +179,12 @@ func TestShellWriteStderr(t *testing.T) {
 
 	// Any output on stderr will be seen as a command failure!
 	_, serr, err := shell.Execute(`[Console]::Error.WriteLine("error")`)
-	require.ErrorIs(t, err, ErrCommandFailed)
+	require.ErrorIs(t, err, powershell.ErrCommandFailed)
 	require.Equal(t, "error", strings.TrimSpace(serr))
 }
 
 func TestShellExceptionThrown(t *testing.T) {
-	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
+	shell, err := powershell.New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -192,19 +192,19 @@ func TestShellExceptionThrown(t *testing.T) {
 
 	msg := "This is an error"
 	_, stderr, err := shell.Execute("throw '" + msg + "'")
-	require.ErrorIs(t, err, ErrCommandFailed)
+	require.ErrorIs(t, err, powershell.ErrCommandFailed)
 	require.Equal(t, msg, strings.TrimSpace(stderr))
 }
 
 func TestShellWriteClosedShell(t *testing.T) {
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 
 	// Close it now
 	_ = shell.Exit()
 
 	_, _, err = shell.Execute("Write-Host")
-	require.ErrorIs(t, err, ErrShellClosed)
+	require.ErrorIs(t, err, powershell.ErrShellClosed)
 }
 
 func TestShellExecuteMultilineScript(t *testing.T) {
@@ -212,7 +212,7 @@ func TestShellExecuteMultilineScript(t *testing.T) {
 Write-Host "hello"
 Write-Host "goodbye"
 `
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -235,7 +235,7 @@ Write-Host "goodbye"
 		_ = os.Remove(scriptFile)
 	}()
 
-	shell, err := New(&backend.Local{})
+	shell, err := powershell.New(&backend.Local{})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -249,7 +249,7 @@ Write-Host "goodbye"
 
 func TestShellWindowsPowerShell(t *testing.T) {
 
-	shell, err := New(&backend.Local{Version: backend.WindowsPowerShell})
+	shell, err := powershell.New(&backend.Local{Version: backend.WindowsPowerShell})
 	require.NoError(t, err)
 	defer func() {
 		_ = shell.Exit()
@@ -260,7 +260,7 @@ func TestShellWindowsPowerShell(t *testing.T) {
 
 func TestShellPwsh(t *testing.T) {
 
-	shell, err := New(&backend.Local{Version: backend.Pwsh})
+	shell, err := powershell.New(&backend.Local{Version: backend.Pwsh})
 	defer func() {
 		_ = shell.Exit()
 	}()
@@ -276,9 +276,9 @@ func TestWithModules(t *testing.T) {
 	// but not imported by default
 	modules := []string{"CimCmdlets", "DnsClient"}
 
-	shell, err := New(
+	shell, err := powershell.New(
 		&backend.Local{},
-		WithModules(modules...),
+		powershell.WithModules(modules...),
 	)
 	defer func() {
 		_ = shell.Exit()
@@ -289,194 +289,5 @@ func TestWithModules(t *testing.T) {
 		out, _, err := shell.Execute(fmt.Sprintf(`if (Get-Module %s) { "YES" } else {"NO"}`, mod))
 		require.NoError(t, err)
 		require.Equal(t, "YES", strings.TrimSpace(out))
-	}
-}
-
-func TestReadWithContext(t *testing.T) {
-
-	const interCommandDelay = time.Millisecond * 100
-
-	pr, pw := io.Pipe()
-	defer func() {
-		_ = pr.Close()
-		_ = pw.Close()
-	}()
-
-	ctx := context.Background()
-	buf := make([]byte, 64)
-
-	var wg sync.WaitGroup
-
-	// Simulate the child process writing chunks to stdout.
-	chunks := []string{
-		"first response\r\n",
-		"second response with more data\r\n",
-		"final short\n",
-	}
-
-	wg.Go(
-		func() {
-
-			for _, c := range chunks {
-				_, _ = pw.Write([]byte(c))
-				// Simulate time gap between commands.
-				time.Sleep(interCommandDelay)
-			}
-			// Stream remains open
-		},
-	)
-
-	for i, c := range chunks {
-		n, err := readWithContext(ctx, pr, buf)
-		if err != nil {
-			require.ErrorIs(t, err, io.EOF, "unexpected error on first read: %v", err)
-		}
-		got := string(buf[:n])
-		require.Equal(t, c, got, "Chunk #%d: got %q", i+1, got)
-	}
-
-	// Now the input is exhausted so read should block
-	ctx, cancel := context.WithTimeout(context.Background(), interCommandDelay*2)
-	defer cancel()
-	n, err := readWithContext(ctx, pr, buf)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Equal(t, n, 0)
-	wg.Wait()
-}
-
-func TestStreamReader(t *testing.T) {
-
-	const interCommandDelay = time.Millisecond * 100
-
-	pr, pw := io.Pipe()
-	defer func() {
-		_ = pr.Close()
-		_ = pw.Close()
-	}()
-
-	testFunc := func(iter int) {
-
-		ctx, cancel := context.WithTimeout(context.Background(), interCommandDelay*5)
-		defer cancel()
-
-		var wg sync.WaitGroup
-
-		// Simulate the child process writing chunks to stdout.
-		chunks := []struct {
-			data     string
-			boundary string
-		}{
-			{
-				data:     "first response\n",
-				boundary: createBoundary(),
-			},
-			{
-				data:     "second response with more data that will be more than fits in the sixty four byte buffer that we use for intermediate reads\n",
-				boundary: createBoundary(),
-			},
-			{
-				data:     "final short\n",
-				boundary: createBoundary(),
-			},
-		}
-
-		wg.Go(func() {
-
-			for _, c := range chunks {
-				data := c.data + c.boundary
-				_, err := pw.Write([]byte(data))
-				require.NoError(t, err, "error writing stdout simulation pipe")
-				// Simulate time gap between commands.
-				time.Sleep(interCommandDelay)
-			}
-			// Stream remains open — no pw.Close() here!
-		})
-
-		time.Sleep(time.Millisecond)
-		for i, c := range chunks {
-
-			sout := ""
-			err := streamReader(ctx, pr, c.boundary, &sout)
-
-			if err != nil {
-				require.ErrorIs(t, err, io.EOF, "unexpected error on read #%d, iter #%d: %v", i+1, iter+1, err)
-			}
-			require.Equal(t, c.data, sout, "Unexpected data on read #%d, iter #%d", i+1, iter+1)
-		}
-
-		// Now the pipe is empty, simulate a context cancel
-		sout := ""
-		err := streamReader(ctx, pr, createBoundary(), &sout)
-		require.ErrorIs(t, err, context.DeadlineExceeded, "expected deadline exceeded but got %v", err)
-		// We seem to need to send something to un-stall the pipe
-		_, _ = pw.Write([]byte(" "))
-		wg.Wait()
-	}
-
-	// Run the whole test twice to check that having stalled the pipe that it recovers.
-	for i := range 2 {
-		testFunc(i)
-	}
-}
-
-func TestDetermineScriptType(t *testing.T) {
-
-	testFile := filepath.Join(os.TempDir(), utils.CreateRandomString(8)+".ps1")
-
-	require.NoError(t, os.WriteFile(testFile, []byte("Write-Host"), 0644))
-	defer func() {
-		_ = os.Remove(testFile)
-	}()
-
-	tests := []struct {
-		name          string
-		input         string
-		expected      scriptType
-		expectedError error
-	}{
-		{
-			name:     "ps1 file exists",
-			input:    testFile,
-			expected: scriptExternalFile,
-		},
-		{
-			name:          "ps1 file does not exist",
-			input:         "asdaer.ps1",
-			expected:      scriptExternalFile,
-			expectedError: os.ErrNotExist,
-		},
-		{
-			name: "multiline",
-			input: `
-			Write-Host
-			Write-Host`,
-			expected: scriptMultiline,
-		},
-		{
-			name:          "command not script",
-			input:         `Write-Host "hello"`,
-			expected:      scriptUnknown,
-			expectedError: ErrScript,
-		},
-		{
-			name:          "command that looks like a filename",
-			input:         `Write-Host`,
-			expected:      scriptExternalFile,
-			expectedError: os.ErrNotExist,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result, err := determineScriptType(test.input)
-
-			if test.expectedError != nil {
-				require.ErrorIs(t, err, test.expectedError)
-			} else {
-				require.NoError(t, err)
-			}
-
-			require.Equal(t, test.expected, result)
-		})
 	}
 }

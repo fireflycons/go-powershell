@@ -1,8 +1,14 @@
 // Copyright (c) 2017 Gorillalabs. All rights reserved.
 
-package utils
+package utils_test
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/fireflycons/go-powershell/utils"
+	"github.com/stretchr/testify/require"
+)
 
 func TestQuotingArguments(t *testing.T) {
 	testcases := [][]string{
@@ -19,10 +25,8 @@ func TestQuotingArguments(t *testing.T) {
 	}
 
 	for i, testcase := range testcases {
-		quoted := QuoteArg(testcase[0])
-
-		if quoted != testcase[1] {
-			t.Errorf("test %02d failed: input '%s', expected %s, actual %s", i+1, testcase[0], testcase[1], quoted)
-		}
+		t.Run(fmt.Sprintf("Case #%d", i), func(t *testing.T) {
+			require.Equal(t, testcase[1], utils.QuoteArg(testcase[0]))
+		})
 	}
 }
