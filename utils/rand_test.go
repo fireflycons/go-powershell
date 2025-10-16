@@ -1,16 +1,18 @@
 // Copyright (c) 2017 Gorillalabs. All rights reserved.
 
-package utils
+package utils_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/fireflycons/go-powershell/utils"
+	"github.com/stretchr/testify/require"
+)
 
 func TestRandomStrings(t *testing.T) {
-	r1 := CreateRandomString(8)
-	r2 := CreateRandomString(8)
+	r1 := utils.CreateRandomString(8)
+	r2 := utils.CreateRandomString(8)
 
-	if r1 == r2 {
-		t.Error("Failed to create random strings: The two generated strings are identical.")
-	} else if len(r1) != 16 {
-		t.Errorf("Expected the random string to contain 16 characters, but got %d.", len(r1))
-	}
+	require.NotEqual(t, r1, r2, "Failed to create random strings: The two generated strings are identical.")
+	require.Len(t, r1, 16, "Expected the random string to contain 16 characters, but got %d.", len(r1))
 }
